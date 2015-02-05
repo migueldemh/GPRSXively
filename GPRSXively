@@ -1,0 +1,253 @@
+/*
+  Remote temperature sensor via GPRS. 
+ I have modified&Copy this codes:
+ http://www.arduino.cc/en/Tutorial/LiquidCrystal
+ http://learn.adafruit.com/thermistor/using-a-thermistor
+ 
+ */
+ 
+// include the library code:
+#include <LiquidCrystal.h>
+#include <Math.h>
+#include <SoftwareSerial.h>
+#include <String.h>
+ 
+// initialize the library with the numbers of the interface pins
+ 
+// which analog pin to connect
+#define THERMISTORPIN 11         
+// resistance at 25 degrees C
+#define THERMISTORNOMINAL 50000      
+// temp. for nominal resistance (almost always 25 C)
+#define TEMPERATURENOMINAL 25   
+// how many samples to take and average, more takes longer
+// but is more 'smooth'
+#define NUMSAMPLES 1800
+// The beta coefficient of the thermistor (usually 3000-4000)
+#define BCOEFFICIENT 4300
+// the value of the 'other' resistor
+#define SERIESRESISTOR 10000
+ 
+// !!! initialize softserial
+//SoftwareSerial Serial1(7, 8);
+ 
+int samples[NUMSAMPLES];
+int samplesLagged[NUMSAMPLES];
+int counter = 0;
+int maxCount = 1800; // number of cycles in between logging via GRPS
+int cycleDuration = 1800000; // time between sampling cycles, in ms 
+int ledSamplingPin = 10;
+int ledSendingPin = 6;
+  int cont=0;
+#define ThermistorPIN 11  // Analog Pin 11
+int ldr = 7;             //analog pin to which LDR is connected
+int ldr_value = 0;        //variable to store LDR values
+
+float vcc = 4.91;  // only used for display purposes, if used
+                   // set to the measured Vcc.
+float pad = 9850;  // balance/pad resistor value, set this to
+                   // the measured resistance of your pad resistor
+float thermr = 10000; // thermistor nominal resistance
+float celsius;
+
+
+int8_t answer;
+int x;
+int j;
+char phone_number[10]; //variable para guardar el numero de movil
+char aux_string[30];
+char mensaje[200];
+
+int angulo=90; //eje central del servo
+int led = 52; // pin del led
+int onModulePin = 2;  // pin correspondiente a boton encendido
+
+void setup() {
+pinMode(onModulePin, OUTPUT);
+    Serial1.begin(19200);               // the GPRS baud rate   
+  Serial.begin(19200);    // the GPRS baud rate 
+    delay(500);
+   power_on();
+   pinMode(led,OUTPUT);
+
+  //analogReference(EXTERNAL);
+ 
+  // powering up GPS shield
+ 
+  Serial.println("powering up GPS shield");   
+    for(j=0; j<3; j++){
+    digitalWrite(led,HIGH);  // Enciende el LED
+    delay(500);            // Temporiza un segundo (1s = 1000ms)
+    digitalWrite(led,LOW);   // Apaga el LED
+    delay(300);
+  }
+
+ 
+}
+ 
+void loop() {
+ 
+  Serial.println("Sampling temperature");
+
+  
+ 
+    // send data to xively every 5 mins
+ 
+  Serial.print("Temperatura: "); 
+  float tempe=Thermistor(analogRead(11));
+  Serial.print(tempe);
+    Serial.println();
+  Serial.print("Luminosidad: "); 
+
+  ldr_value = 100-((analogRead(ldr)*100)/1023);          //reads the LDR values
+  Serial.print(ldr_value);                 //prints the LDR values to serial monitor
+
+  Serial.println();
+    digitalWrite(ledSendingPin, HIGH);
+ 
+
+ sendATcommand("AT", "OK", 2000); 
+    Serial1.println("AT+CGATT?");
+    delay(1000);
+ 
+    ShowSerialData();
+ 
+  Serial1.println("AT+CSTT=\"movistart.es\"");//start task and setting the APN,
+    delay(1000);
+ 
+    ShowSerialData();
+ 
+    Serial1.println("AT+CIICR");//bring up wireless connection
+    delay(3000);
+ 
+    ShowSerialData();
+ 
+    Serial1.println("AT+CIFSR");//get local IP adress
+    delay(2000);
+ 
+    ShowSerialData();
+ 
+    Serial1.println("AT+CIPSPRT=0");
+    delay(3000);
+    ShowSerialData();
+ 
+    Serial1.println("AT+CIPSTART=\"TCP\",\"api.xively.com\",\"8081\"");//start up the connection
+    delay(2000);
+ 
+    ShowSerialData();
+ 
+    Serial1.println("AT+CIPSEND");//begin send data to remote server
+    delay(4000);
+    ShowSerialData();
+ 
+    Serial1.print("{\"method\": \"put\",\"resource\": \"/feeds/2050485183\",\"params\" : {},");//here is the feed you apply from Xively
+    delay(500);
+    ShowSerialData();
+    Serial1.print("\"headers\": {\"X-ApiKey\":");//Xivelyapikey
+    delay(500);
+    ShowSerialData();
+    Serial1.print("\"eaH5YmOVH0XET3ZhK9u9XmviH3nNBbjseQxN8S\"},\"body\":");
+    delay(500);
+    ShowSerialData();
+    Serial1.print(" {\"version\": \"1.0.0\",\"datastreams\": ");
+    delay(500);
+    ShowSerialData();
+ 
+    Serial1.print("[{\"id\": \"sensorT\",\"current_value\": \"");  
+    Serial1.print(tempe);
+    Serial1.println("\"}]}}");
+    
+       /* Serial1.print("[{\"id\": \"Luminosidad\",\"current_value\": \"");  
+    Serial1.print(ldr_value);
+    Serial1.println("\"}]}}");
+ */
+    delay(500);
+    ShowSerialData();
+ 
+    Serial1.println((char)26);
+    delay(5000);
+ 
+    Serial1.println();
+ 
+    ShowSerialData();
+ 
+    Serial1.println("AT+CIPCLOSE");//close the connection
+    delay(100);
+    ShowSerialData();
+ 
+   
+    digitalWrite(ledSendingPin, LOW);
+ 
+    // reset counter  
+
+ 
+
+  delay(cycleDuration);
+} 
+ 
+void ShowSerialData()
+{
+  while(Serial1.available()!=0)
+    Serial.write(Serial1.read());
+    Serial.println(Serial1.read());
+}
+int8_t sendATcommand(char* ATcommand, char* expected_answer, unsigned int timeout){
+    uint8_t x=0,  answer=0;
+    char response[100];
+    unsigned long previous;
+
+    memset(response, '\0', 100);    
+    delay(100);
+    while( Serial1.available() > 0) Serial1.read();   
+    Serial1.println(ATcommand);    
+    x = 0;
+    previous = millis();
+
+    do{
+
+        if(Serial1.available() != 0){    
+            response[x] = Serial1.read();
+            x++;
+
+            if (strstr(response, expected_answer) != NULL)    
+            {
+                answer = 1;
+            }
+        }
+   
+    }while((answer == 0) && ((millis() - previous) < timeout));    
+    Serial.println(response);
+    return answer;
+}
+void power_on(){
+    uint8_t answer=0;
+    delay(4000);
+
+    answer = sendATcommand("AT", "OK", 3000);
+    if (answer == 0)
+    {   
+        digitalWrite(onModulePin,HIGH);
+        delay(3000);
+        digitalWrite(onModulePin,LOW);
+        
+        while(answer == 0){   
+            answer = sendATcommand("AT", "OK", 2000);   
+             Serial.print("¿Esta encendido? ");  
+          Serial.print(answer);
+          Serial.println(""); 
+        }
+    } 
+}
+float Thermistor(int RawADC) {
+  long Resistance;  
+  float Temp;  // Dual-Purpose variable to save space.
+
+  Resistance=((1024 * pad / RawADC) - pad); 
+  // Saving the Log(resistance) so not to calculate  it 4 times later
+  Temp = log(Resistance); 
+  Temp = 1 / (0.001129148 + (0.000234125 * Temp) + 
+         (0.0000000876741 * Temp * Temp * Temp));
+  Temp = Temp - 273.15;  // Convert Kelvin to Celsius                      
+
+  return Temp;    
+}
